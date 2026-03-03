@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlexFlix</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="ambient-layer"></div>
+
+    <header class="top-nav">
+      <div class="brand-wrap">
+        <span class="brand">FlexFlix</span>
+        <span class="chip">Local Library</span>
+      </div>
+
+      <div class="nav-controls">
+        <label class="search-wrap" for="searchInput">
+          <span>Search</span>
+          <input id="searchInput" type="search" placeholder="Title, genre, language, country..." autocomplete="off" />
+        </label>
+        <button id="rescanButton" class="btn btn-ghost" type="button">Rescan Drive</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="heroSection" class="hero hidden">
+        <div class="hero-backdrop" id="heroBackdrop"></div>
+        <div class="hero-gradient"></div>
+
+        <div class="hero-content">
+          <p class="eyebrow">Featured</p>
+          <h1 id="heroTitle">Loading...</h1>
+          <p id="heroMeta" class="hero-meta"></p>
+          <p id="heroDescription" class="hero-description"></p>
+
+          <div class="hero-actions">
+            <button id="heroPlayButton" class="btn btn-primary" type="button">Play Movie</button>
+            <button id="heroTrailerButton" class="btn btn-ghost" type="button">Watch Trailer</button>
+            <button id="heroEditButton" class="btn btn-chip hidden" type="button">Edit Missing Info</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="library-section">
+        <div class="section-head">
+          <h2>Your Movies</h2>
+          <p id="statusText" class="status-text">Reading local library...</p>
+        </div>
+
+        <div id="movieGrid" class="movie-grid"></div>
+      </section>
+    </main>
+
+    <template id="movieCardTemplate">
+      <article class="movie-card">
+        <button class="poster-shell" type="button">
+          <img class="poster" alt="Movie poster" loading="lazy" />
+          <div class="fallback-poster">
+            <span class="fallback-title"></span>
+          </div>
+        </button>
+
+        <div class="movie-info">
+          <div class="movie-title-row">
+            <h3 class="movie-title"></h3>
+            <button class="edit-chip edit-btn" type="button">Edit</button>
+          </div>
+          <p class="movie-meta"></p>
+          <p class="movie-genre"></p>
+          <p class="movie-origin"></p>
+          <p class="movie-description"></p>
+          <div class="movie-actions">
+            <button class="btn btn-primary play-btn" type="button">Play</button>
+            <button class="btn btn-ghost trailer-btn" type="button">Trailer</button>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <div id="trailerModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close="trailer"></div>
+      <section class="modal-panel trailer-panel" role="dialog" aria-modal="true" aria-labelledby="trailerModalTitle">
+        <div class="modal-head">
+          <h3 id="trailerModalTitle">Trailer</h3>
+          <button id="closeTrailerModal" class="icon-btn" type="button" aria-label="Close trailer">x</button>
+        </div>
+        <div class="video-wrap">
+          <iframe
+            id="trailerFrame"
+            title="Trailer player"
+            src="about:blank"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowfullscreen
+          ></iframe>
+        </div>
+        <p id="trailerHint" class="trailer-hint hidden"></p>
+      </section>
+    </div>
+
+    <div id="editModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close="edit"></div>
+      <section class="modal-panel edit-panel" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
+        <div class="modal-head">
+          <h3 id="editModalTitle">Edit Missing Info</h3>
+          <button id="closeEditModal" class="icon-btn" type="button" aria-label="Close edit form">x</button>
+        </div>
+
+        <p class="modal-note">Add missing poster/details or override values. Leave a field empty to remove a previous manual value.</p>
+
+        <form id="editForm" class="edit-form">
+          <label>
+            <span>Title</span>
+            <input name="title" type="text" />
+          </label>
+
+          <label>
+            <span>Release Year</span>
+            <input name="releaseYear" type="text" />
+          </label>
+
+          <label>
+            <span>Rated</span>
+            <input name="rated" type="text" placeholder="PG-13" />
+          </label>
+
+          <label>
+            <span>Genre</span>
+            <input name="genre" type="text" placeholder="Action, Thriller" />
+          </label>
+
+          <label>
+            <span>Language</span>
+            <input name="language" type="text" placeholder="English" />
+          </label>
+
+          <label>
+            <span>Country of Origin</span>
+            <input name="country" type="text" placeholder="United States" />
+          </label>
+
+          <label>
+            <span>Poster URL</span>
+            <input name="poster" type="url" placeholder="https://..." />
+          </label>
+
+          <label>
+            <span>Trailer URL (YouTube preferred)</span>
+            <input name="trailerLink" type="url" placeholder="https://www.youtube.com/watch?v=..." />
+          </label>
+
+          <label class="full-width">
+            <span>Short Description</span>
+            <textarea name="description" rows="4"></textarea>
+          </label>
+
+          <div class="form-actions full-width">
+            <button id="cancelEditButton" class="btn btn-ghost" type="button">Cancel</button>
+            <button id="saveEditButton" class="btn btn-primary" type="submit">Save Changes</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
