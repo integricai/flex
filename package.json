@@ -1,17 +1,60 @@
 {
   "name": "flexflix-local-library",
-  "version": "1.0.0",
-  "description": "Netflix-style local movie library that reads files from disk and enriches them with OMDb data.",
-  "main": "server.js",
+  "version": "1.1.0",
+  "description": "Production-ready desktop movie library that reads local files, enriches metadata, and launches VLC.",
+  "main": "electron/main.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "electron .",
+    "start:web": "node server.js",
+    "dev": "electron .",
+    "dev:web": "node --watch server.js",
+    "build:win": "electron-builder --win nsis",
+    "dist": "electron-builder"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^7.1.0",
+    "pino": "^9.3.2",
+    "pino-http": "^10.3.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.integricai.flexflix",
+    "productName": "FlexFlix",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "public/**/*",
+      "server.js",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }
