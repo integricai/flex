@@ -57,6 +57,15 @@ function getMovieById(movieId) {
   return state.movies.find((movie) => movie.id === movieId) || null;
 }
 
+function pickRandomMovieId(movies) {
+  if (!Array.isArray(movies) || !movies.length) {
+    return null;
+  }
+
+  const randomIndex = Math.floor(Math.random() * movies.length);
+  return movies[randomIndex]?.id || null;
+}
+
 function isDefaultOrMissingValue(field, value) {
   const normalized = String(value || "").trim();
   if (!normalized) {
@@ -222,7 +231,7 @@ function renderFeaturedMovie() {
   ui.heroPlayButton.onclick = async () => {
     try {
       await playMovie(movie.id);
-      setStatus(`Playing ${movie.title} in your default video player.`);
+      setStatus(`Playing ${movie.title} in VLC player.`);
     } catch (error) {
       setStatus(`Could not play movie: ${error.message}`);
     }
@@ -284,7 +293,7 @@ function makeMovieCard(movie, index) {
 
     try {
       await playMovie(movie.id);
-      setStatus(`Playing ${movie.title} in your default video player.`);
+      setStatus(`Playing ${movie.title} in VLC player.`);
     } catch (error) {
       setStatus(`Could not play movie: ${error.message}`);
     } finally {
@@ -358,7 +367,7 @@ async function loadMovies(options = {}) {
   if (previousFeaturedId && getMovieById(previousFeaturedId)) {
     state.featuredMovieId = previousFeaturedId;
   } else if (!getMovieById(state.featuredMovieId)) {
-    state.featuredMovieId = state.movies[0] ? state.movies[0].id : null;
+    state.featuredMovieId = pickRandomMovieId(state.movies);
   }
 
   state.filteredMovies = [...state.movies];
@@ -484,3 +493,5 @@ async function boot() {
 }
 
 boot();
+
+

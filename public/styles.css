@@ -485,6 +485,13 @@ main {
   background: #000;
 }
 
+.video-wrap iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
 
 
 .trailer-hint {
@@ -631,5 +638,6 @@ main {
     align-items: flex-start;
   }
 }
+
 
 

@@ -11,6 +11,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const MOVIES_DIR = process.env.MOVIES_DIR;
 const OMDB_API_KEY = process.env.OMDB_API_KEY;
+const VLC_PATH = String(process.env.VLC_PATH || "").trim();
 
 const CACHE_DIR = path.join(__dirname, ".cache");
 const OMDB_CACHE_FILE = path.join(CACHE_DIR, "omdb-cache.json");
@@ -36,6 +37,7 @@ let baseMovies = [];
 let moviesIndex = [];
 let lastScan = null;
 let scanPromise = null;
+let resolvedVlcPath = null;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -456,15 +458,41 @@ function buildMovieRecord(filePath, parsedMovie, omdbMovie) {
   };
 }
 
-function openInDefaultPlayer(filePath) {
+function resolveVlcPath() {
+  if (resolvedVlcPath && fs.existsSync(resolvedVlcPath)) {
+    return resolvedVlcPath;
+  }
+
+  const candidates = [
+    VLC_PATH,
+    "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe",
+    "C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe",
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Programs", "VideoLAN", "VLC", "vlc.exe") : null
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      resolvedVlcPath = candidate;
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function openInVlc(filePath) {
   if (!fs.existsSync(filePath)) {
     throw new Error("Movie file is no longer available on disk.");
   }
 
-  const escapedPath = filePath.replace(/"/g, '""');
-  const command = `start "" "${escapedPath}"`;
+  const vlcExecutable = resolveVlcPath();
+  if (!vlcExecutable) {
+    throw new Error(
+      "VLC executable not found. Install VLC or set VLC_PATH in .env (example: C:\\Program Files\\VideoLAN\\VLC\\vlc.exe)."
+    );
+  }
 
-  const child = spawn("cmd.exe", ["/c", command], {
+  const child = spawn(vlcExecutable, [filePath], {
     detached: true,
     stdio: "ignore",
     windowsHide: true
@@ -513,7 +541,9 @@ app.get("/api/health", (_req, res) => {
     lastScan,
     movieCount: moviesIndex.length,
     manualOverrideCount: Object.keys(manualOverrides).length,
-    trailerCacheCount: Object.keys(trailerCache).length
+    trailerCacheCount: Object.keys(trailerCache).length,
+    vlcAvailable: Boolean(resolveVlcPath()),
+    vlcPath: resolveVlcPath()
   });
 });
 
@@ -629,8 +659,8 @@ app.post("/api/play", (req, res) => {
   }
 
   try {
-    openInDefaultPlayer(match.sourcePath);
-    return res.json({ ok: true });
+    openInVlc(match.sourcePath);
+    return res.json({ ok: true, player: "vlc" });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -649,6 +679,10 @@ async function boot() {
     console.warn("OMDB_API_KEY or MOVIES_DIR is missing. Update your .env file.");
   }
 
+  if (!resolveVlcPath()) {
+    console.warn("VLC executable not found. Set VLC_PATH in .env to enable Play in VLC.");
+  }
+
   try {
     await scanMovies();
     console.log(`Indexed ${moviesIndex.length} movie(s) from ${MOVIES_DIR}`);
@@ -665,4 +699,5 @@ boot().catch((error) => {
   console.error("Server failed to start:", error);
   process.exitCode = 1;
 });
+
 

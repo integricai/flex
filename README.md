@@ -18,7 +18,7 @@ A Netflix-style interface for local movies on `D:\Movies`, enriched with OMDb (I
   - Trailer link (IMDb video gallery when IMDb id exists)
 - Small edit controls for fixing missing poster/details manually, persisted locally.
 - In-page trailer popup with embedded YouTube player (no new tab required), with server-side trailer ID resolution for IMDb links.
-- `Play` opens the selected movie in your default system video player.
+- `Play` launches the selected movie in VLC desktop player.
 - Modern Netflix-style, responsive interface.
 
 ## Setup
@@ -35,6 +35,7 @@ npm install
 OMDB_API_KEY=b1663db
 MOVIES_DIR=D:\Movies
 PORT=3000
+VLC_PATH=C:\Program Files\VideoLAN\VLC\vlc.exe
 ```
 
 3. Start the app:
@@ -74,4 +75,8 @@ OMDb response caching is stored in:
 .cache/omdb-cache.json
 ```
 
+Trailer resolution cache is stored in:
 
+```text
+.cache/trailer-cache.json
+```
