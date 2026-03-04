@@ -1,7 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const fsp = require("fs/promises");
-const { app, BrowserWindow, dialog, shell } = require("electron");
+const { app, BrowserWindow, dialog, shell, ipcMain } = require("electron");
 const { createFlexServer } = require("../server");
 
 let mainWindow = null;
@@ -135,6 +135,28 @@ async function startBackend() {
   return started;
 }
 
+function registerIpcHandlers() {
+  ipcMain.handle("flexflix:select-movies-directory", async () => {
+    const result = await dialog.showOpenDialog(mainWindow || undefined, {
+      title: "Select Movies Folder",
+      properties: ["openDirectory", "dontAddToRecent"],
+      defaultPath: app.getPath("home")
+    });
+
+    if (result.canceled || !result.filePaths.length) {
+      return {
+        canceled: true,
+        folderPath: null
+      };
+    }
+
+    return {
+      canceled: false,
+      folderPath: result.filePaths[0]
+    };
+  });
+}
+
 async function shutdownAndExit(exitCode = 0) {
   if (isQuitting) {
     return;
@@ -176,6 +198,7 @@ app.on("activate", () => {
 
 app.whenReady().then(async () => {
   try {
+    registerIpcHandlers();
     const started = await startBackend();
     createMainWindow(started.port);
   } catch (error) {

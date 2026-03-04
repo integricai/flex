@@ -1,6 +1,7 @@
-const { contextBridge } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("flexDesktop", {
   platform: "desktop",
-  runtime: "electron"
+  runtime: "electron",
+  selectMoviesDirectory: async () => ipcRenderer.invoke("flexflix:select-movies-directory")
 });

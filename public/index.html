@@ -15,6 +15,59 @@
   <body>
     <div class="ambient-layer"></div>
 
+    <div id="authGate" class="auth-gate hidden" aria-hidden="true">
+      <div class="auth-backdrop"></div>
+      <section class="auth-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+        <p class="auth-eyebrow">FlexFlix Profiles</p>
+        <h1 id="authTitle">Continue to your movie library</h1>
+        <p class="auth-subtitle">Create a local profile once, then FlexFlix will keep you signed in on this device until you sign out.</p>
+
+        <div class="auth-mode-switch" role="tablist" aria-label="Authentication mode">
+          <button id="authModeRegister" class="auth-mode-btn is-active" type="button" role="tab" aria-selected="true">Register</button>
+          <button id="authModeLogin" class="auth-mode-btn" type="button" role="tab" aria-selected="false">Sign In</button>
+        </div>
+
+        <p id="authMessage" class="auth-message"></p>
+
+        <form id="authForm" class="auth-form">
+          <label>
+            <span>Email</span>
+            <input id="authEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+          </label>
+
+          <label>
+            <span>Password</span>
+            <input
+              id="authPassword"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              minlength="8"
+              placeholder="Minimum 8 characters"
+              required
+            />
+          </label>
+
+          <label id="authDisplayNameField" class="register-only">
+            <span>Display Name</span>
+            <input id="authDisplayName" name="displayName" type="text" maxlength="64" placeholder="How your name should appear" />
+          </label>
+
+          <label id="authDisplayImageField" class="register-only">
+            <span>Display Image URL</span>
+            <input id="authDisplayImage" name="displayImage" type="url" placeholder="https://..." />
+          </label>
+
+          <label id="authDisplayImageFileField" class="register-only">
+            <span>Or Upload Image</span>
+            <input id="authDisplayImageFile" type="file" accept="image/*" />
+          </label>
+
+          <button id="authSubmitButton" class="btn btn-primary" type="submit">Create Profile</button>
+        </form>
+      </section>
+    </div>
+
     <header class="top-nav">
       <div class="brand-wrap">
         <span class="brand">FlexFlix</span>
@@ -27,6 +80,19 @@
           <input id="searchInput" type="search" placeholder="Title, genre, language, country..." autocomplete="off" />
         </label>
         <button id="rescanButton" class="btn btn-ghost" type="button">Rescan Drive</button>
+        <button id="settingsButton" class="icon-btn settings-trigger hidden" type="button" aria-label="Settings">&#9881;</button>
+
+        <div id="activeUser" class="active-user hidden" aria-live="polite">
+          <div id="activeUserAvatar" class="active-user-avatar" aria-hidden="true">
+            <img id="activeUserAvatarImage" alt="Active profile avatar" class="hidden" />
+            <span id="activeUserAvatarFallback"></span>
+          </div>
+          <div class="active-user-meta">
+            <p id="activeUserName" class="active-user-name"></p>
+            <p id="activeUserEmail" class="active-user-email"></p>
+          </div>
+          <button id="logoutButton" class="btn btn-ghost logout-btn" type="button">Sign Out</button>
+        </div>
       </div>
     </header>
 
@@ -102,6 +168,35 @@
           ></iframe>
         </div>
         <p id="trailerHint" class="trailer-hint hidden"></p>
+      </section>
+    </div>
+
+    <div id="settingsModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close="settings"></div>
+      <section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+        <div class="modal-head">
+          <h3 id="settingsModalTitle">Settings</h3>
+          <button id="closeSettingsModal" class="icon-btn" type="button" aria-label="Close settings">x</button>
+        </div>
+
+        <p class="modal-note">Choose the local folder for your video collection. FlexFlix will rescan and refresh your library immediately.</p>
+
+        <form id="settingsForm" class="settings-form">
+          <label class="full-width">
+            <span>Video Collection Folder</span>
+            <div class="settings-path-row">
+              <input id="settingsMoviesDir" name="moviesDir" type="text" placeholder="D:\Movies" required />
+              <button id="browseMoviesDirButton" class="btn btn-ghost settings-browse" type="button">Browse</button>
+            </div>
+          </label>
+
+          <p id="settingsHint" class="settings-hint full-width"></p>
+
+          <div class="form-actions full-width">
+            <button id="cancelSettingsButton" class="btn btn-ghost" type="button">Cancel</button>
+            <button id="saveSettingsButton" class="btn btn-primary" type="submit">Save Folder</button>
+          </div>
+        </form>
       </section>
     </div>
 

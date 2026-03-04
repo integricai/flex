@@ -5,7 +5,13 @@ const state = {
   filteredMovies: [],
   featuredMovieId: null,
   editingMovieId: null,
-  activeTrailerToken: null
+  activeTrailerToken: null,
+  currentUser: null,
+  authMode: "register",
+  pendingAvatarDataUrl: null,
+  settings: {
+    moviesDir: ""
+  }
 };
 
 const ui = {
@@ -19,6 +25,7 @@ const ui = {
   heroEditButton: document.getElementById("heroEditButton"),
   searchInput: document.getElementById("searchInput"),
   rescanButton: document.getElementById("rescanButton"),
+  settingsButton: document.getElementById("settingsButton"),
   statusText: document.getElementById("statusText"),
   movieGrid: document.getElementById("movieGrid"),
   movieCardTemplate: document.getElementById("movieCardTemplate"),
@@ -32,7 +39,34 @@ const ui = {
   editModalTitle: document.getElementById("editModalTitle"),
   editForm: document.getElementById("editForm"),
   cancelEditButton: document.getElementById("cancelEditButton"),
-  saveEditButton: document.getElementById("saveEditButton")
+  saveEditButton: document.getElementById("saveEditButton"),
+  settingsModal: document.getElementById("settingsModal"),
+  closeSettingsModal: document.getElementById("closeSettingsModal"),
+  settingsForm: document.getElementById("settingsForm"),
+  settingsMoviesDir: document.getElementById("settingsMoviesDir"),
+  browseMoviesDirButton: document.getElementById("browseMoviesDirButton"),
+  cancelSettingsButton: document.getElementById("cancelSettingsButton"),
+  saveSettingsButton: document.getElementById("saveSettingsButton"),
+  settingsHint: document.getElementById("settingsHint"),
+  authGate: document.getElementById("authGate"),
+  authForm: document.getElementById("authForm"),
+  authModeRegister: document.getElementById("authModeRegister"),
+  authModeLogin: document.getElementById("authModeLogin"),
+  authMessage: document.getElementById("authMessage"),
+  authDisplayNameField: document.getElementById("authDisplayNameField"),
+  authDisplayImageField: document.getElementById("authDisplayImageField"),
+  authDisplayName: document.getElementById("authDisplayName"),
+  authDisplayImage: document.getElementById("authDisplayImage"),
+  authDisplayImageFileField: document.getElementById("authDisplayImageFileField"),
+  authDisplayImageFile: document.getElementById("authDisplayImageFile"),
+  authPassword: document.getElementById("authPassword"),
+  authSubmitButton: document.getElementById("authSubmitButton"),
+  activeUser: document.getElementById("activeUser"),
+  activeUserAvatarImage: document.getElementById("activeUserAvatarImage"),
+  activeUserAvatarFallback: document.getElementById("activeUserAvatarFallback"),
+  activeUserName: document.getElementById("activeUserName"),
+  activeUserEmail: document.getElementById("activeUserEmail"),
+  logoutButton: document.getElementById("logoutButton")
 };
 
 function formatMovieMeta(movie) {
@@ -83,17 +117,6 @@ function isDefaultOrMissingValue(field, value) {
   return false;
 }
 
-async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
-  }
-
-  return payload;
-}
-
 function setStatus(text) {
   ui.statusText.textContent = text;
 }
@@ -111,6 +134,126 @@ function setTrailerHint(text, isError = false) {
   ui.trailerHint.classList.toggle("is-error", Boolean(isError));
 }
 
+function setAuthMessage(text, isError = false) {
+  ui.authMessage.textContent = text || "";
+  ui.authMessage.classList.toggle("is-error", Boolean(isError));
+}
+
+function setAuthMode(mode, options = {}) {
+  const normalizedMode = mode === "login" ? "login" : "register";
+  state.authMode = normalizedMode;
+
+  const registerMode = normalizedMode === "register";
+  ui.authModeRegister.classList.toggle("is-active", registerMode);
+  ui.authModeRegister.setAttribute("aria-selected", registerMode ? "true" : "false");
+
+  ui.authModeLogin.classList.toggle("is-active", !registerMode);
+  ui.authModeLogin.setAttribute("aria-selected", !registerMode ? "true" : "false");
+
+  ui.authDisplayNameField.classList.toggle("hidden", !registerMode);
+  ui.authDisplayImageField.classList.toggle("hidden", !registerMode);
+  ui.authDisplayImageFileField.classList.toggle("hidden", !registerMode);
+  ui.authSubmitButton.textContent = registerMode ? "Create Profile" : "Sign In";
+
+  ui.authPassword.autocomplete = registerMode ? "new-password" : "current-password";
+
+  if (!registerMode) {
+    state.pendingAvatarDataUrl = null;
+    ui.authDisplayImageFile.value = "";
+  }
+
+  if (!options.keepMessage) {
+    setAuthMessage(registerMode ? "Create your profile to unlock your library." : "Sign in with your registered email and password.");
+  }
+}
+
+function setSettingsHint(text, isError = false) {
+  ui.settingsHint.textContent = text || "";
+  ui.settingsHint.classList.toggle("is-error", Boolean(isError));
+}
+
+async function loadSettings() {
+  const payload = await fetchJson("/api/settings");
+  state.settings.moviesDir = String(payload.moviesDir || "").trim();
+  return payload;
+}
+
+function openSettingsModal() {
+  ui.settingsMoviesDir.value = state.settings.moviesDir || "";
+  setSettingsHint("Select the folder that contains your movie files.");
+  openModal(ui.settingsModal);
+}
+
+function closeSettingsModal() {
+  setSettingsHint("");
+  closeModal(ui.settingsModal);
+}
+
+async function browseForMoviesDirectory() {
+  if (!window.flexDesktop || typeof window.flexDesktop.selectMoviesDirectory !== "function") {
+    setSettingsHint("Folder picker is available in the desktop app build.", true);
+    return;
+  }
+
+  try {
+    const result = await window.flexDesktop.selectMoviesDirectory();
+    if (!result || result.canceled || !result.folderPath) {
+      return;
+    }
+
+    ui.settingsMoviesDir.value = result.folderPath;
+    setSettingsHint("Selected folder: " + result.folderPath);
+  } catch (error) {
+    setSettingsHint("Could not open folder picker: " + error.message, true);
+  }
+}
+
+async function submitSettingsForm(event) {
+  event.preventDefault();
+
+  const nextMoviesDir = String(ui.settingsMoviesDir.value || "").trim();
+  if (!nextMoviesDir) {
+    setSettingsHint("Please select a valid folder path.", true);
+    return;
+  }
+
+  ui.saveSettingsButton.disabled = true;
+  ui.saveSettingsButton.textContent = "Saving...";
+  ui.browseMoviesDirButton.disabled = true;
+
+  try {
+    const result = await fetchJson("/api/settings/movies-dir", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ moviesDir: nextMoviesDir })
+    });
+
+    state.settings.moviesDir = String(result.moviesDir || nextMoviesDir).trim();
+    closeSettingsModal();
+
+    await loadMovies({
+      preserveSearch: true,
+      preserveFeaturedId: state.featuredMovieId
+    });
+
+    setStatus("Video folder set to " + state.settings.moviesDir + ". Library refreshed.");
+  } catch (error) {
+    if (error.status === 401) {
+      closeSettingsModal();
+      await requireReAuth("Session expired. Sign in to continue.");
+      return;
+    }
+
+    setSettingsHint(error.message, true);
+  } finally {
+    ui.saveSettingsButton.disabled = false;
+    ui.saveSettingsButton.textContent = "Save Folder";
+    ui.browseMoviesDirButton.disabled = false;
+  }
+}
+
 function openModal(modalElement) {
   modalElement.classList.remove("hidden");
   modalElement.setAttribute("aria-hidden", "false");
@@ -121,8 +264,151 @@ function closeModal(modalElement) {
   modalElement.classList.add("hidden");
   modalElement.setAttribute("aria-hidden", "true");
 
-  if (ui.trailerModal.classList.contains("hidden") && ui.editModal.classList.contains("hidden")) {
+  if (
+    ui.trailerModal.classList.contains("hidden") &&
+    ui.editModal.classList.contains("hidden") &&
+    ui.settingsModal.classList.contains("hidden")
+  ) {
     document.body.classList.remove("modal-open");
+  }
+}
+
+function showAuthGate(mode = "register") {
+  setAuthMode(mode);
+  ui.authGate.classList.remove("hidden");
+  ui.authGate.setAttribute("aria-hidden", "false");
+  document.body.classList.add("auth-locked");
+}
+
+function hideAuthGate() {
+  ui.authGate.classList.add("hidden");
+  ui.authGate.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("auth-locked");
+  setAuthMessage("");
+  state.pendingAvatarDataUrl = null;
+  ui.authForm.reset();
+}
+
+function getUserInitials(user) {
+  const base = String(user?.displayName || user?.email || "U")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  if (!base) {
+    return "U";
+  }
+
+  const parts = base.split(" ").filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  return base.slice(0, 2).toUpperCase();
+}
+
+function renderActiveUser() {
+  const user = state.currentUser;
+
+  if (!user) {
+    ui.activeUser.classList.add("hidden");
+    ui.activeUserAvatarImage.src = "";
+    ui.activeUserAvatarImage.classList.add("hidden");
+    ui.activeUserAvatarFallback.textContent = "";
+    ui.settingsButton.classList.add("hidden");
+    return;
+  }
+
+  ui.activeUser.classList.remove("hidden");
+  ui.settingsButton.classList.remove("hidden");
+  ui.activeUserName.textContent = user.displayName || user.email;
+  ui.activeUserEmail.textContent = user.email || "";
+  ui.activeUserAvatarFallback.textContent = getUserInitials(user);
+
+  const image = String(user.displayImage || "").trim();
+  if (image) {
+    ui.activeUserAvatarImage.src = image;
+    ui.activeUserAvatarImage.classList.remove("hidden");
+    return;
+  }
+
+  ui.activeUserAvatarImage.src = "";
+  ui.activeUserAvatarImage.classList.add("hidden");
+}
+
+function clearLibraryState() {
+  state.movies = [];
+  state.filteredMovies = [];
+  state.featuredMovieId = null;
+  state.editingMovieId = null;
+  state.activeTrailerToken = null;
+
+  ui.movieGrid.innerHTML = "";
+  ui.heroSection.classList.add("hidden");
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const error = new Error(payload.error || "Request failed");
+    error.status = response.status;
+    throw error;
+  }
+
+  return payload;
+}
+
+async function requireReAuth(message) {
+  closeTrailerModal();
+  closeEditModal();
+  closeSettingsModal();
+
+  state.currentUser = null;
+  renderActiveUser();
+  clearLibraryState();
+  showAuthGate("login");
+
+  setStatus(message || "Please sign in to continue.");
+  setAuthMessage(message || "Your session ended. Sign in again.", true);
+}
+
+async function syncAuthSession() {
+  try {
+    const payload = await fetchJson("/api/auth/session");
+
+    if (payload.authenticated && payload.user) {
+      state.currentUser = payload.user;
+      hideAuthGate();
+      renderActiveUser();
+
+      try {
+        await loadSettings();
+      } catch (settingsError) {
+        setStatus("Could not load settings: " + settingsError.message);
+      }
+
+      return true;
+    }
+
+    state.currentUser = null;
+    renderActiveUser();
+    clearLibraryState();
+
+    if (payload.hasRegisteredUsers) {
+      showAuthGate("login");
+      setStatus("Sign in to view your local movies.");
+    } else {
+      showAuthGate("register");
+      setStatus("Create your first profile to start using FlexFlix.");
+    }
+
+    return false;
+  } catch (error) {
+    showAuthGate("register");
+    setStatus(`Could not initialize authentication: ${error.message}`);
+    setAuthMessage(`Could not initialize authentication: ${error.message}`, true);
+    return false;
   }
 }
 
@@ -151,6 +437,12 @@ async function openTrailerModal(movie) {
     setTrailerHint("No embeddable trailer found. Use Edit and paste a direct YouTube Trailer URL.", true);
   } catch (error) {
     if (state.activeTrailerToken !== trailerToken || ui.trailerModal.classList.contains("hidden")) {
+      return;
+    }
+
+    if (error.status === 401) {
+      closeTrailerModal();
+      await requireReAuth("Session expired. Sign in to continue.");
       return;
     }
 
@@ -190,7 +482,7 @@ function closeEditModal() {
 }
 
 async function playMovie(movieId) {
-  await fetchJson("/api/play", {
+  return fetchJson("/api/play", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -233,6 +525,11 @@ function renderFeaturedMovie() {
       await playMovie(movie.id);
       setStatus(`Playing ${movie.title} in VLC player.`);
     } catch (error) {
+      if (error.status === 401) {
+        await requireReAuth("Session expired. Sign in to continue.");
+        return;
+      }
+
       setStatus(`Could not play movie: ${error.message}`);
     }
   };
@@ -295,6 +592,11 @@ function makeMovieCard(movie, index) {
       await playMovie(movie.id);
       setStatus(`Playing ${movie.title} in VLC player.`);
     } catch (error) {
+      if (error.status === 401) {
+        await requireReAuth("Session expired. Sign in to continue.");
+        return;
+      }
+
       setStatus(`Could not play movie: ${error.message}`);
     } finally {
       playButton.disabled = false;
@@ -361,7 +663,18 @@ async function loadMovies(options = {}) {
 
   setStatus("Syncing local movies and IMDb metadata...");
 
-  const payload = await fetchJson("/api/movies");
+  let payload;
+  try {
+    payload = await fetchJson("/api/movies");
+  } catch (error) {
+    if (error.status === 401) {
+      await requireReAuth("Session expired. Sign in to continue.");
+      return;
+    }
+
+    throw error;
+  }
+
   state.movies = payload.movies || [];
 
   if (previousFeaturedId && getMovieById(previousFeaturedId)) {
@@ -397,6 +710,11 @@ async function rescanMovies() {
       preserveFeaturedId: state.featuredMovieId
     });
   } catch (error) {
+    if (error.status === 401) {
+      await requireReAuth("Session expired. Sign in to continue.");
+      return;
+    }
+
     setStatus(`Rescan failed: ${error.message}`);
   } finally {
     ui.rescanButton.disabled = false;
@@ -439,6 +757,11 @@ async function submitEditForm(event) {
     closeEditModal();
     setStatus(`Saved manual details for ${movie.title}.`);
   } catch (error) {
+    if (error.status === 401) {
+      await requireReAuth("Session expired. Sign in to continue.");
+      return;
+    }
+
     setStatus(`Could not save changes: ${error.message}`);
   } finally {
     ui.saveEditButton.disabled = false;
@@ -446,9 +769,142 @@ async function submitEditForm(event) {
   }
 }
 
+function readImageFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read selected image file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleAuthImageFileChange() {
+  const file = ui.authDisplayImageFile.files?.[0];
+
+  if (!file) {
+    state.pendingAvatarDataUrl = null;
+    return;
+  }
+
+  if (!file.type.startsWith("image/")) {
+    state.pendingAvatarDataUrl = null;
+    ui.authDisplayImageFile.value = "";
+    setAuthMessage("Please choose a valid image file.", true);
+    return;
+  }
+
+  if (file.size > 1_500_000) {
+    state.pendingAvatarDataUrl = null;
+    ui.authDisplayImageFile.value = "";
+    setAuthMessage("Image is too large. Use an image under 1.5MB.", true);
+    return;
+  }
+
+  try {
+    const dataUrl = await readImageFileAsDataUrl(file);
+    state.pendingAvatarDataUrl = dataUrl;
+    setAuthMessage("Profile image selected from file.");
+  } catch (error) {
+    state.pendingAvatarDataUrl = null;
+    ui.authDisplayImageFile.value = "";
+    setAuthMessage(error.message, true);
+  }
+}
+
+async function submitAuthForm(event) {
+  event.preventDefault();
+
+  const formData = new FormData(ui.authForm);
+  const payload = {
+    email: String(formData.get("email") || "").trim(),
+    password: String(formData.get("password") || "")
+  };
+
+  if (state.authMode === "register") {
+    payload.displayName = String(formData.get("displayName") || "").trim();
+
+    const imageFromUrl = String(formData.get("displayImage") || "").trim();
+    payload.displayImage = imageFromUrl || state.pendingAvatarDataUrl;
+  }
+
+  const endpoint = state.authMode === "register" ? "/api/auth/register" : "/api/auth/login";
+  const buttonLabel = state.authMode === "register" ? "Create Profile" : "Sign In";
+
+  ui.authSubmitButton.disabled = true;
+  ui.authSubmitButton.textContent = state.authMode === "register" ? "Creating..." : "Signing in...";
+
+  try {
+    const result = await fetchJson(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    state.currentUser = result.user || null;
+    renderActiveUser();
+    hideAuthGate();
+
+    await loadSettings();
+    await loadMovies();
+    setStatus(`Welcome ${state.currentUser?.displayName || state.currentUser?.email || ""}.`);
+  } catch (error) {
+    setAuthMessage(error.message, true);
+  } finally {
+    ui.authSubmitButton.disabled = false;
+    ui.authSubmitButton.textContent = buttonLabel;
+  }
+}
+
+async function logout() {
+  ui.logoutButton.disabled = true;
+
+  try {
+    await fetchJson("/api/auth/logout", {
+      method: "POST"
+    });
+
+    closeTrailerModal();
+    closeEditModal();
+    closeSettingsModal();
+
+    state.currentUser = null;
+    renderActiveUser();
+    clearLibraryState();
+
+    showAuthGate("login");
+    setStatus("Signed out. Sign back in to continue.");
+  } catch (error) {
+    setStatus(`Could not sign out: ${error.message}`);
+  } finally {
+    ui.logoutButton.disabled = false;
+  }
+}
+
 function wireEvents() {
   ui.searchInput.addEventListener("input", applySearch);
-  ui.rescanButton.addEventListener("click", rescanMovies);
+  ui.rescanButton.addEventListener("click", () => {
+    void rescanMovies();
+  });
+
+  ui.settingsButton.addEventListener("click", () => {
+    openSettingsModal();
+  });
+
+  ui.closeSettingsModal.addEventListener("click", closeSettingsModal);
+  ui.cancelSettingsButton.addEventListener("click", closeSettingsModal);
+  ui.settingsModal.addEventListener("click", (event) => {
+    if (event.target?.dataset?.close === "settings") {
+      closeSettingsModal();
+    }
+  });
+
+  ui.browseMoviesDirButton.addEventListener("click", () => {
+    void browseForMoviesDirectory();
+  });
+
+  ui.settingsForm.addEventListener("submit", submitSettingsForm);
 
   ui.closeTrailerModal.addEventListener("click", closeTrailerModal);
   ui.trailerModal.addEventListener("click", (event) => {
@@ -467,6 +923,28 @@ function wireEvents() {
 
   ui.editForm.addEventListener("submit", submitEditForm);
 
+  ui.authModeRegister.addEventListener("click", () => {
+    setAuthMode("register");
+  });
+
+  ui.authModeLogin.addEventListener("click", () => {
+    setAuthMode("login");
+  });
+
+  ui.authForm.addEventListener("submit", submitAuthForm);
+  ui.authDisplayImageFile.addEventListener("change", () => {
+    void handleAuthImageFileChange();
+  });
+
+  ui.logoutButton.addEventListener("click", () => {
+    void logout();
+  });
+
+  ui.activeUserAvatarImage.addEventListener("error", () => {
+    ui.activeUserAvatarImage.src = "";
+    ui.activeUserAvatarImage.classList.add("hidden");
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") {
       return;
@@ -479,11 +957,20 @@ function wireEvents() {
     if (!ui.editModal.classList.contains("hidden")) {
       closeEditModal();
     }
+
+    if (!ui.settingsModal.classList.contains("hidden")) {
+      closeSettingsModal();
+    }
   });
 }
 
 async function boot() {
   wireEvents();
+
+  const authenticated = await syncAuthSession();
+  if (!authenticated) {
+    return;
+  }
 
   try {
     await loadMovies();
@@ -493,5 +980,3 @@ async function boot() {
 }
 
 boot();
-
-

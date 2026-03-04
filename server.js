@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const crypto = require("crypto");
+const os = require("os");
 const { spawn } = require("child_process");
 const helmet = require("helmet");
 const compression = require("compression");
@@ -14,6 +15,7 @@ require("dotenv").config();
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mkv", ".avi", ".mov", ".wmv", ".webm"]);
 const EDITABLE_FIELDS = ["title", "releaseYear", "rated", "description", "genre", "language", "country", "poster", "trailerLink"];
+const MIN_PASSWORD_LENGTH = 8;
 
 function parsePort(value, fallback) {
   const port = Number(value);
@@ -63,13 +65,23 @@ function createFlexServer(overrides = {}) {
   const paths = {
     omdbCache: path.join(config.dataDir, "omdb-cache.json"),
     overrides: path.join(config.dataDir, "manual-overrides.json"),
-    trailerCache: path.join(config.dataDir, "trailer-cache.json")
+    trailerCache: path.join(config.dataDir, "trailer-cache.json"),
+    usersEncrypted: path.join(config.dataDir, "users.secure.json"),
+    session: path.join(config.dataDir, "auth-session.json"),
+    settings: path.join(config.dataDir, "app-settings.json")
   };
 
   const state = {
     omdbCache: {},
     manualOverrides: {},
     trailerCache: {},
+    usersById: {},
+    usersVersion: 1,
+    activeSession: null,
+    authKey: null,
+    settings: {
+      moviesDir: String(config.moviesDir || "").trim()
+    },
     baseMovies: [],
     moviesIndex: [],
     lastScan: null,
@@ -163,6 +175,321 @@ function createFlexServer(overrides = {}) {
   async function saveJsonFile(filePath, value) {
     await fsp.mkdir(config.dataDir, { recursive: true });
     await fsp.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
+  }
+
+  function normalizeMoviesDir(value) {
+    const raw = String(value || "").trim();
+    if (!raw) {
+      return "";
+    }
+
+    return path.resolve(raw);
+  }
+
+  function getMoviesDir() {
+    return normalizeMoviesDir(state.settings.moviesDir || config.moviesDir || "");
+  }
+
+  async function persistSettings() {
+    await saveJsonFile(paths.settings, {
+      moviesDir: getMoviesDir()
+    });
+  }
+
+  async function setMoviesDir(nextDir) {
+    const normalized = normalizeMoviesDir(nextDir);
+    if (!normalized) {
+      throw new Error("Movies folder path is required.");
+    }
+
+    let stats;
+    try {
+      stats = await fsp.stat(normalized);
+    } catch {
+      throw new Error("Movies folder not found: " + normalized);
+    }
+
+    if (!stats.isDirectory()) {
+      throw new Error("Movies folder path must be a directory.");
+    }
+
+    const current = getMoviesDir();
+    if (current.toLowerCase() === normalized.toLowerCase()) {
+      return {
+        changed: false,
+        moviesDir: current
+      };
+    }
+
+    state.settings.moviesDir = normalized;
+    config.moviesDir = normalized;
+
+    await persistSettings();
+
+    state.baseMovies = [];
+    state.moviesIndex = [];
+    state.lastScan = null;
+
+    await scanMovies();
+
+    return {
+      changed: true,
+      moviesDir: normalized
+    };
+  }
+
+  function normalizeEmail(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase();
+  }
+
+  function isValidEmail(value) {
+    const email = normalizeEmail(value);
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  }
+
+  function sanitizeDisplayName(value) {
+    const displayName = String(value || "").trim().replace(/\s+/g, " ");
+    return displayName.slice(0, 64);
+  }
+
+  function sanitizeDisplayImage(value) {
+    const image = String(value || "").trim();
+    if (!image) {
+      return null;
+    }
+
+    if (/^https?:\/\//i.test(image)) {
+      return image.slice(0, 4096);
+    }
+
+    if (/^data:image\//i.test(image)) {
+      return image.length <= 2_500_000 ? image : null;
+    }
+
+    return null;
+  }
+
+  function sanitizePublicUser(user) {
+    if (!user) {
+      return null;
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      displayImage: user.displayImage || null,
+      createdAt: user.createdAt || null,
+      lastLoginAt: user.lastLoginAt || null
+    };
+  }
+
+  function getAuthSecretMaterial() {
+    const configuredSecret = String(process.env.FLEXFLIX_AUTH_SECRET || "").trim();
+    if (configuredSecret) {
+      return configuredSecret;
+    }
+
+    let username = "unknown-user";
+    try {
+      username = os.userInfo().username || process.env.USERNAME || process.env.USER || username;
+    } catch {
+      username = process.env.USERNAME || process.env.USER || username;
+    }
+
+    const machineFingerprint = [
+      os.hostname() || "unknown-host",
+      username,
+      process.platform,
+      process.arch,
+      config.dataDir
+    ].join("|");
+
+    return "flexflix-local-secret|" + machineFingerprint;
+  }
+
+  function getAuthKey() {
+    if (!state.authKey) {
+      state.authKey = crypto.scryptSync(getAuthSecretMaterial(), "flexflix-auth|" + config.dataDir, 32);
+    }
+
+    return state.authKey;
+  }
+
+  function encryptObject(payload) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", getAuthKey(), iv);
+    const data = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
+    const tag = cipher.getAuthTag();
+
+    return {
+      v: 1,
+      iv: iv.toString("base64"),
+      tag: tag.toString("base64"),
+      data: data.toString("base64")
+    };
+  }
+
+  function decryptObject(payload) {
+    if (!payload || payload.v !== 1 || !payload.iv || !payload.tag || !payload.data) {
+      throw new Error("Encrypted payload is invalid.");
+    }
+
+    const iv = Buffer.from(payload.iv, "base64");
+    const tag = Buffer.from(payload.tag, "base64");
+    const data = Buffer.from(payload.data, "base64");
+
+    const decipher = crypto.createDecipheriv("aes-256-gcm", getAuthKey(), iv);
+    decipher.setAuthTag(tag);
+
+    const decrypted = Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+    return JSON.parse(decrypted);
+  }
+
+  function normalizeUsersStore(payload) {
+    const usersById = payload?.usersById && typeof payload.usersById === "object" ? payload.usersById : {};
+    const cleanedUsersById = {};
+
+    for (const [userId, user] of Object.entries(usersById)) {
+      if (!user || typeof user !== "object") {
+        continue;
+      }
+
+      const email = normalizeEmail(user.email);
+      if (!email || !user.passwordHash || !user.passwordSalt) {
+        continue;
+      }
+
+      cleanedUsersById[userId] = {
+        id: user.id || userId,
+        email,
+        displayName: sanitizeDisplayName(user.displayName) || email,
+        displayImage: sanitizeDisplayImage(user.displayImage),
+        passwordHash: String(user.passwordHash),
+        passwordSalt: String(user.passwordSalt),
+        createdAt: user.createdAt || new Date().toISOString(),
+        lastLoginAt: user.lastLoginAt || null
+      };
+    }
+
+    return {
+      version: Number(payload?.version) || 1,
+      usersById: cleanedUsersById
+    };
+  }
+
+  async function loadEncryptedUsersStore() {
+    try {
+      const content = await fsp.readFile(paths.usersEncrypted, "utf8");
+      const parsed = JSON.parse(content);
+      const decrypted = decryptObject(parsed);
+      return normalizeUsersStore(decrypted);
+    } catch {
+      return {
+        version: 1,
+        usersById: {}
+      };
+    }
+  }
+
+  async function saveEncryptedUsersStore() {
+    const payload = {
+      version: state.usersVersion,
+      usersById: state.usersById
+    };
+
+    const encrypted = encryptObject(payload);
+    await fsp.mkdir(config.dataDir, { recursive: true });
+    await fsp.writeFile(paths.usersEncrypted, JSON.stringify(encrypted, null, 2), "utf8");
+  }
+
+  function hashPassword(password, salt) {
+    return crypto.pbkdf2Sync(password, salt, 210000, 64, "sha512").toString("hex");
+  }
+
+  function verifyPassword(password, user) {
+    const computed = hashPassword(password, user.passwordSalt);
+    const stored = Buffer.from(user.passwordHash, "hex");
+    const current = Buffer.from(computed, "hex");
+
+    if (stored.length !== current.length) {
+      return false;
+    }
+
+    return crypto.timingSafeEqual(stored, current);
+  }
+
+  function findUserByEmail(email) {
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    for (const user of Object.values(state.usersById)) {
+      if (user.email === normalizedEmail) {
+        return user;
+      }
+    }
+
+    return null;
+  }
+
+  async function saveActiveSession(userId) {
+    state.activeSession = {
+      userId,
+      createdAt: new Date().toISOString()
+    };
+
+    await saveJsonFile(paths.session, state.activeSession);
+  }
+
+  async function clearActiveSession() {
+    state.activeSession = null;
+
+    try {
+      await fsp.unlink(paths.session);
+    } catch {
+      // Ignore if already removed.
+    }
+  }
+
+  async function loadActiveSession() {
+    const session = await loadJsonFile(paths.session, null);
+    if (!session || typeof session !== "object") {
+      state.activeSession = null;
+      return;
+    }
+
+    const userId = String(session.userId || "");
+    if (!userId || !state.usersById[userId]) {
+      state.activeSession = null;
+      return;
+    }
+
+    state.activeSession = {
+      userId,
+      createdAt: session.createdAt || new Date().toISOString()
+    };
+  }
+
+  function getActiveUser() {
+    if (!state.activeSession?.userId) {
+      return null;
+    }
+
+    return state.usersById[state.activeSession.userId] || null;
+  }
+
+  function ensureAuthenticated(req, res, next) {
+    const user = getActiveUser();
+    if (!user) {
+      return res.status(401).json({ error: "Authentication required." });
+    }
+
+    req.activeUser = sanitizePublicUser(user);
+    return next();
   }
 
   function hasMissingMovieInfo(movie) {
@@ -578,15 +905,17 @@ function createFlexServer(overrides = {}) {
     }
 
     state.scanPromise = (async () => {
-      if (!config.moviesDir) {
-        throw new Error("MOVIES_DIR is not configured. Add it to your .env file.");
+      const moviesDir = getMoviesDir();
+
+      if (!moviesDir) {
+        throw new Error("Movies folder is not configured. Set it in Settings.");
       }
 
-      if (!fs.existsSync(config.moviesDir)) {
-        throw new Error(`Movies directory not found: ${config.moviesDir}`);
+      if (!fs.existsSync(moviesDir)) {
+        throw new Error("Movies directory not found: " + moviesDir);
       }
 
-      const movieFiles = await collectMovieFiles(config.moviesDir);
+      const movieFiles = await collectMovieFiles(moviesDir);
 
       state.baseMovies = await mapWithConcurrency(movieFiles, 6, async (filePath) => {
         const parsedMovie = parseMovieFromFilename(filePath);
@@ -605,28 +934,183 @@ function createFlexServer(overrides = {}) {
     return state.scanPromise;
   }
 
+  app.get("/api/auth/session", (_req, res) => {
+    const activeUser = getActiveUser();
+
+    res.json({
+      authenticated: Boolean(activeUser),
+      user: sanitizePublicUser(activeUser),
+      hasRegisteredUsers: Object.keys(state.usersById).length > 0
+    });
+  });
+
+  app.post("/api/auth/register", async (req, res) => {
+    const body = req.body || {};
+    const email = normalizeEmail(body.email);
+    const password = String(body.password || "");
+    const displayName = sanitizeDisplayName(body.displayName) || email;
+    const displayImage = sanitizeDisplayImage(body.displayImage);
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: "Enter a valid email address." });
+    }
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: "Password must be at least " + MIN_PASSWORD_LENGTH + " characters." });
+    }
+
+    if (findUserByEmail(email)) {
+      return res.status(409).json({ error: "An account with that email already exists." });
+    }
+
+    const userId = crypto.randomUUID();
+    const passwordSalt = crypto.randomBytes(16).toString("hex");
+    const passwordHash = hashPassword(password, passwordSalt);
+    const now = new Date().toISOString();
+
+    state.usersById[userId] = {
+      id: userId,
+      email,
+      displayName,
+      displayImage,
+      passwordHash,
+      passwordSalt,
+      createdAt: now,
+      lastLoginAt: now
+    };
+
+    try {
+      await saveEncryptedUsersStore();
+      await saveActiveSession(userId);
+
+      return res.status(201).json({
+        ok: true,
+        user: sanitizePublicUser(state.usersById[userId])
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Could not persist registered profile");
+      return res.status(500).json({ error: "Could not save profile." });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    const body = req.body || {};
+    const email = normalizeEmail(body.email);
+    const password = String(body.password || "");
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: "Enter a valid email address." });
+    }
+
+    const user = findUserByEmail(email);
+    if (!user || !verifyPassword(password, user)) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    user.lastLoginAt = new Date().toISOString();
+
+    try {
+      await saveEncryptedUsersStore();
+      await saveActiveSession(user.id);
+
+      return res.json({
+        ok: true,
+        user: sanitizePublicUser(user)
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Could not persist login session");
+      return res.status(500).json({ error: "Could not complete login." });
+    }
+  });
+
+  app.post("/api/auth/logout", async (_req, res) => {
+    try {
+      await clearActiveSession();
+      return res.json({ ok: true });
+    } catch (error) {
+      logger.error({ err: error }, "Could not clear active session");
+      return res.status(500).json({ error: "Could not sign out." });
+    }
+  });
+
+  app.post("/api/auth/profile", ensureAuthenticated, async (req, res) => {
+    const user = getActiveUser();
+    if (!user) {
+      return res.status(401).json({ error: "Authentication required." });
+    }
+
+    const body = req.body || {};
+    const displayName = sanitizeDisplayName(body.displayName) || user.email;
+    const displayImage = sanitizeDisplayImage(body.displayImage);
+
+    user.displayName = displayName;
+    user.displayImage = displayImage;
+
+    try {
+      await saveEncryptedUsersStore();
+      return res.json({
+        ok: true,
+        user: sanitizePublicUser(user)
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Could not save profile updates");
+      return res.status(500).json({ error: "Could not update profile." });
+    }
+  });
+
+  app.get("/api/settings", ensureAuthenticated, (_req, res) => {
+    const moviesDir = getMoviesDir();
+
+    res.json({
+      moviesDir,
+      lastScan: state.lastScan,
+      movieCount: state.moviesIndex.length
+    });
+  });
+
+  app.post("/api/settings/movies-dir", ensureAuthenticated, async (req, res) => {
+    const body = req.body || {};
+    const requestedPath = String(body.moviesDir || "").trim();
+
+    try {
+      const result = await setMoviesDir(requestedPath);
+
+      return res.json({
+        ok: true,
+        changed: result.changed,
+        moviesDir: result.moviesDir,
+        lastScan: state.lastScan,
+        movieCount: state.moviesIndex.length
+      });
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  });
+
   app.get("/api/health", (_req, res) => {
     res.json({
       ok: true,
-      sourceDir: config.moviesDir || null,
+      sourceDir: getMoviesDir() || null,
       lastScan: state.lastScan,
       movieCount: state.moviesIndex.length,
       manualOverrideCount: Object.keys(state.manualOverrides).length,
       trailerCacheCount: Object.keys(state.trailerCache).length,
       vlcAvailable: Boolean(resolveVlcPath()),
       vlcPath: resolveVlcPath(),
+      authenticated: Boolean(getActiveUser()),
+      registeredUserCount: Object.keys(state.usersById).length,
       dataDir: config.dataDir
     });
   });
 
-  app.get("/api/movies", async (_req, res) => {
+  app.get("/api/movies", ensureAuthenticated, async (_req, res) => {
     try {
       if (!state.lastScan) {
         await scanMovies();
       }
 
       res.json({
-        sourceDir: config.moviesDir,
+        sourceDir: getMoviesDir(),
         lastScan: state.lastScan,
         movieCount: state.moviesIndex.length,
         movies: state.moviesIndex.map((movie) => serializeMovie(movie))
@@ -636,7 +1120,7 @@ function createFlexServer(overrides = {}) {
     }
   });
 
-  app.get("/api/movies/:id/trailer", async (req, res) => {
+  app.get("/api/movies/:id/trailer", ensureAuthenticated, async (req, res) => {
     const { id } = req.params;
     const match = state.moviesIndex.find((movie) => movie.id === id);
 
@@ -660,7 +1144,7 @@ function createFlexServer(overrides = {}) {
     }
   });
 
-  app.post("/api/rescan", async (_req, res) => {
+  app.post("/api/rescan", ensureAuthenticated, async (_req, res) => {
     try {
       await scanMovies();
       res.json({
@@ -673,7 +1157,7 @@ function createFlexServer(overrides = {}) {
     }
   });
 
-  app.post("/api/movies/:id/override", async (req, res) => {
+  app.post("/api/movies/:id/override", ensureAuthenticated, async (req, res) => {
     const { id } = req.params;
     if (!id) {
       return res.status(400).json({ error: "Movie id is required." });
@@ -719,7 +1203,7 @@ function createFlexServer(overrides = {}) {
     }
   });
 
-  app.post("/api/play", (req, res) => {
+  app.post("/api/play", ensureAuthenticated, (req, res) => {
     const { id } = req.body || {};
     if (!id) {
       return res.status(400).json({ error: "Movie id is required." });
@@ -756,8 +1240,28 @@ function createFlexServer(overrides = {}) {
     state.manualOverrides = await loadJsonFile(paths.overrides, {});
     state.trailerCache = await loadJsonFile(paths.trailerCache, {});
 
-    if (!config.moviesDir || !config.omdbApiKey) {
-      logger.warn("OMDB_API_KEY or MOVIES_DIR is missing. Update your .env file.");
+    const savedSettings = await loadJsonFile(paths.settings, {});
+    const savedMoviesDir = normalizeMoviesDir(savedSettings.moviesDir);
+    if (savedMoviesDir) {
+      state.settings.moviesDir = savedMoviesDir;
+      config.moviesDir = savedMoviesDir;
+    } else {
+      state.settings.moviesDir = normalizeMoviesDir(config.moviesDir);
+    }
+
+    await persistSettings();
+
+    const usersStore = await loadEncryptedUsersStore();
+    state.usersById = usersStore.usersById;
+    state.usersVersion = usersStore.version;
+    await loadActiveSession();
+
+    if (state.activeSession?.userId) {
+      logger.info({ userId: state.activeSession.userId }, "Restored active user session");
+    }
+
+    if (!getMoviesDir() || !config.omdbApiKey) {
+      logger.warn("OMDB_API_KEY or Movies folder is missing. Update configuration in Settings.");
     }
 
     if (!resolveVlcPath()) {
@@ -766,7 +1270,7 @@ function createFlexServer(overrides = {}) {
 
     try {
       await scanMovies();
-      logger.info({ movieCount: state.moviesIndex.length, sourceDir: config.moviesDir }, "Initial movie scan complete");
+      logger.info({ movieCount: state.moviesIndex.length, sourceDir: getMoviesDir() }, "Initial movie scan complete");
     } catch (error) {
       logger.warn({ err: error }, "Initial movie scan failed");
     }
@@ -819,6 +1323,7 @@ function createFlexServer(overrides = {}) {
     getState: () => ({
       movieCount: state.moviesIndex.length,
       lastScan: state.lastScan,
+      sourceDir: getMoviesDir(),
       dataDir: config.dataDir
     })
   };

@@ -47,6 +47,9 @@ If your library path is different, edit `moviesDir` and restart the app.
   - Country of Origin
   - Poster
 - Trailer popup with embedded YouTube playback.
+- Local profile system with register/login, display name, and display image.
+- Persisted signed-in session (no password needed again until sign out).
+- Settings panel to change movie folder and refresh collection instantly.
 - Manual metadata/poster/trailer overrides.
 - `Play` launches the selected movie in VLC desktop player.
 
@@ -63,6 +66,7 @@ VLC_PATH=C:\Program Files\VideoLAN\VLC\vlc.exe
 LOG_LEVEL=info
 API_RATE_LIMIT_PER_MINUTE=300
 # APP_DATA_DIR=C:\FlexFlixData
+# FLEXFLIX_AUTH_SECRET=replace_with_a_long_random_secret
 ```
 
 ## Run (Desktop)
@@ -95,6 +99,9 @@ Runtime data caches are stored in the app data directory (`APP_DATA_DIR` or defa
 - `omdb-cache.json`
 - `manual-overrides.json`
 - `trailer-cache.json`
+- `users.secure.json` (encrypted profile + password-hash storage)
+- `auth-session.json` (active signed-in user session)
+- `app-settings.json` (runtime settings such as selected movies folder)
 
 ## Naming Convention
 
