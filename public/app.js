@@ -1,4 +1,46 @@
-const EDITABLE_FIELDS = ["title", "releaseYear", "rated", "description", "genre", "language", "country", "poster", "trailerLink"];
+const EDITABLE_FIELDS = ["title", "releaseYear", "rated", "description", "genre", "language", "country", "poster", "trailerLink", "tag"];
+
+const TAG_OPTIONS = [
+  "Drama",
+  "Coming-of-age",
+  "Gay",
+  "Romance",
+  "Romantic Comedy (Rom-Com)",
+  "Family",
+  "Comedy",
+  "Dark Comedy",
+  "Action",
+  "Adventure",
+  "War",
+  "Disaster",
+  "Horror",
+  "Psychological Horror",
+  "Slasher",
+  "Supernatural",
+  "Monster",
+  "Vampire",
+  "Zombie",
+  "Thriller",
+  "Psychological Thriller",
+  "Crime Thriller",
+  "Mystery",
+  "Science Fiction (Sci-Fi)",
+  "Time Travel",
+  "Fantasy",
+  "Crime",
+  "Detective",
+  "Gangster",
+  "Legal Drama",
+  "Historical",
+  "Period Drama",
+  "Biographical (Biopic)",
+  "Musical",
+  "Dance",
+  "Teen",
+  "Documentary",
+  "Docudrama",
+  "Concert Film"
+];
 
 const state = {
   movies: [],
@@ -10,7 +52,8 @@ const state = {
   authMode: "register",
   pendingAvatarDataUrl: null,
   settings: {
-    moviesDir: ""
+    moviesDir: "",
+    parentalLock: false
   }
 };
 
@@ -38,6 +81,7 @@ const ui = {
   closeEditModal: document.getElementById("closeEditModal"),
   editModalTitle: document.getElementById("editModalTitle"),
   editForm: document.getElementById("editForm"),
+  editTagSelect: document.getElementById("editTagSelect"),
   cancelEditButton: document.getElementById("cancelEditButton"),
   saveEditButton: document.getElementById("saveEditButton"),
   settingsModal: document.getElementById("settingsModal"),
@@ -45,6 +89,8 @@ const ui = {
   settingsForm: document.getElementById("settingsForm"),
   settingsMoviesDir: document.getElementById("settingsMoviesDir"),
   browseMoviesDirButton: document.getElementById("browseMoviesDirButton"),
+  settingsParentalLockOn: document.getElementById("settingsParentalLockOn"),
+  settingsParentalLockOff: document.getElementById("settingsParentalLockOff"),
   cancelSettingsButton: document.getElementById("cancelSettingsButton"),
   saveSettingsButton: document.getElementById("saveSettingsButton"),
   settingsHint: document.getElementById("settingsHint"),
@@ -117,6 +163,36 @@ function isDefaultOrMissingValue(field, value) {
   return false;
 }
 
+function normalizeTagList(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))];
+  }
+
+  const textValue = String(value || "").trim();
+  if (!textValue) {
+    return [];
+  }
+
+  return [...new Set(textValue.split(",").map((item) => item.trim()).filter(Boolean))];
+}
+
+function populateTagOptions() {
+  if (!ui.editTagSelect) {
+    return;
+  }
+
+  if (ui.editTagSelect.options.length) {
+    return;
+  }
+
+  for (const optionValue of TAG_OPTIONS) {
+    const option = document.createElement("option");
+    option.value = optionValue;
+    option.textContent = optionValue;
+    ui.editTagSelect.append(option);
+  }
+}
+
 function setStatus(text) {
   ui.statusText.textContent = text;
 }
@@ -175,12 +251,15 @@ function setSettingsHint(text, isError = false) {
 async function loadSettings() {
   const payload = await fetchJson("/api/settings");
   state.settings.moviesDir = String(payload.moviesDir || "").trim();
+  state.settings.parentalLock = Boolean(payload.parentalLock);
   return payload;
 }
 
 function openSettingsModal() {
   ui.settingsMoviesDir.value = state.settings.moviesDir || "";
-  setSettingsHint("Select the folder that contains your movie files.");
+  ui.settingsParentalLockOn.checked = Boolean(state.settings.parentalLock);
+  ui.settingsParentalLockOff.checked = !state.settings.parentalLock;
+  setSettingsHint("Select the folder and parental-lock preference for your library.");
   openModal(ui.settingsModal);
 }
 
@@ -217,6 +296,8 @@ async function submitSettingsForm(event) {
     return;
   }
 
+  const nextParentalLock = Boolean(ui.settingsParentalLockOn.checked);
+
   ui.saveSettingsButton.disabled = true;
   ui.saveSettingsButton.textContent = "Saving...";
   ui.browseMoviesDirButton.disabled = true;
@@ -227,10 +308,14 @@ async function submitSettingsForm(event) {
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ moviesDir: nextMoviesDir })
+      body: JSON.stringify({
+        moviesDir: nextMoviesDir,
+        parentalLock: nextParentalLock
+      })
     });
 
     state.settings.moviesDir = String(result.moviesDir || nextMoviesDir).trim();
+    state.settings.parentalLock = Boolean(result.parentalLock);
     closeSettingsModal();
 
     await loadMovies({
@@ -238,7 +323,8 @@ async function submitSettingsForm(event) {
       preserveFeaturedId: state.featuredMovieId
     });
 
-    setStatus("Video folder set to " + state.settings.moviesDir + ". Library refreshed.");
+    const lockStatus = state.settings.parentalLock ? "On (G/U/PG-13 only)" : "Off";
+    setStatus("Settings saved. Folder: " + state.settings.moviesDir + " | Parental Lock: " + lockStatus + ".");
   } catch (error) {
     if (error.status === 401) {
       closeSettingsModal();
@@ -249,7 +335,7 @@ async function submitSettingsForm(event) {
     setSettingsHint(error.message, true);
   } finally {
     ui.saveSettingsButton.disabled = false;
-    ui.saveSettingsButton.textContent = "Save Folder";
+    ui.saveSettingsButton.textContent = "Save Settings";
     ui.browseMoviesDirButton.disabled = false;
   }
 }
@@ -460,7 +546,9 @@ function closeTrailerModal() {
 
 function openEditModal(movie) {
   state.editingMovieId = movie.id;
-  ui.editModalTitle.textContent = `Edit Details: ${movie.title}`;
+  ui.editModalTitle.textContent = "Edit Details: " + movie.title;
+
+  populateTagOptions();
 
   for (const field of EDITABLE_FIELDS) {
     const input = ui.editForm.elements.namedItem(field);
@@ -469,6 +557,18 @@ function openEditModal(movie) {
     }
 
     const value = movie[field];
+
+    if (field === "tag") {
+      const selectedTags = normalizeTagList(value);
+      const selectedSet = new Set(selectedTags);
+
+      for (const option of ui.editTagSelect.options) {
+        option.selected = selectedSet.has(option.value);
+      }
+
+      continue;
+    }
+
     input.value = isDefaultOrMissingValue(field, value) ? "" : String(value || "");
   }
 
@@ -478,6 +578,13 @@ function openEditModal(movie) {
 function closeEditModal() {
   state.editingMovieId = null;
   ui.editForm.reset();
+
+  if (ui.editTagSelect) {
+    for (const option of ui.editTagSelect.options) {
+      option.selected = false;
+    }
+  }
+
   closeModal(ui.editModal);
 }
 
@@ -688,7 +795,8 @@ async function loadMovies(options = {}) {
   renderMovieGrid();
 
   const timestamp = payload.lastScan ? new Date(payload.lastScan).toLocaleString() : "N/A";
-  setStatus(`Loaded ${state.movies.length} movies from ${payload.sourceDir || "unknown folder"}. Last scan: ${timestamp}.`);
+  const lockText = payload.parentalLock ? " Parental Lock: On (G/U/PG-13 only)." : "";
+  setStatus(`Loaded ${state.movies.length} movies from ${payload.sourceDir || "unknown folder"}. Last scan: ${timestamp}.` + lockText);
 
   if (preserveSearch && previousSearch.trim()) {
     ui.searchInput.value = previousSearch;
@@ -740,6 +848,11 @@ async function submitEditForm(event) {
   const payload = {};
 
   for (const field of EDITABLE_FIELDS) {
+    if (field === "tag") {
+      payload[field] = formData.getAll(field);
+      continue;
+    }
+
     payload[field] = formData.get(field);
   }
 
@@ -965,6 +1078,7 @@ function wireEvents() {
 }
 
 async function boot() {
+  populateTagOptions();
   wireEvents();
 
   const authenticated = await syncAuthSession();

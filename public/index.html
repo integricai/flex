@@ -190,11 +190,23 @@
             </div>
           </label>
 
+          <fieldset class="settings-lock-group full-width">
+            <legend>Parental Lock</legend>
+            <label class="settings-radio-option">
+              <input id="settingsParentalLockOff" type="radio" name="parentalLock" value="off" checked />
+              <span>Off (Show all ratings)</span>
+            </label>
+            <label class="settings-radio-option">
+              <input id="settingsParentalLockOn" type="radio" name="parentalLock" value="on" />
+              <span>On (Only G, U, PG-13)</span>
+            </label>
+          </fieldset>
+
           <p id="settingsHint" class="settings-hint full-width"></p>
 
           <div class="form-actions full-width">
             <button id="cancelSettingsButton" class="btn btn-ghost" type="button">Cancel</button>
-            <button id="saveSettingsButton" class="btn btn-primary" type="submit">Save Folder</button>
+            <button id="saveSettingsButton" class="btn btn-primary" type="submit">Save Settings</button>
           </div>
         </form>
       </section>
@@ -249,6 +261,11 @@
           <label>
             <span>Trailer URL (YouTube preferred)</span>
             <input name="trailerLink" type="url" placeholder="https://www.youtube.com/watch?v=..." />
+          </label>
+
+          <label class="full-width">
+            <span>Tag</span>
+            <select id="editTagSelect" name="tag" multiple size="10"></select>
           </label>
 
           <label class="full-width">

@@ -734,6 +734,49 @@ main {
   min-width: 108px;
 }
 
+.settings-lock-group {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.settings-lock-group legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.settings-radio-option {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  font-size: 0.92rem !important;
+  color: var(--text) !important;
+}
+
+.settings-radio-option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  accent-color: var(--accent);
+}
+
+.settings-radio-option span {
+  color: var(--text);
+}
+
 .settings-hint {
   margin: 0;
   color: var(--muted);
@@ -767,7 +810,8 @@ main {
 }
 
 .edit-form input,
-.edit-form textarea {
+.edit-form textarea,
+.edit-form select {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -779,10 +823,20 @@ main {
 }
 
 .edit-form input:focus-visible,
-.edit-form textarea:focus-visible {
+.edit-form textarea:focus-visible,
+.edit-form select:focus-visible {
   outline: none;
   border-color: var(--ring);
   box-shadow: 0 0 0 3px rgba(229, 9, 20, 0.2);
+}
+
+.edit-form select[multiple] {
+  min-height: 190px;
+  padding: 8px 10px;
+}
+
+.edit-form select[multiple] option {
+  padding: 4px 6px;
 }
 
 .full-width {

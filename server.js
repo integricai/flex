@@ -14,7 +14,7 @@ const pinoHttp = require("pino-http");
 require("dotenv").config();
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mkv", ".avi", ".mov", ".wmv", ".webm"]);
-const EDITABLE_FIELDS = ["title", "releaseYear", "rated", "description", "genre", "language", "country", "poster", "trailerLink"];
+const EDITABLE_FIELDS = ["title", "releaseYear", "rated", "description", "genre", "language", "country", "poster", "trailerLink", "tag"];
 const MIN_PASSWORD_LENGTH = 8;
 
 function parsePort(value, fallback) {
@@ -80,7 +80,8 @@ function createFlexServer(overrides = {}) {
     activeSession: null,
     authKey: null,
     settings: {
-      moviesDir: String(config.moviesDir || "").trim()
+      moviesDir: String(config.moviesDir || "").trim(),
+      parentalLock: false
     },
     baseMovies: [],
     moviesIndex: [],
@@ -190,9 +191,52 @@ function createFlexServer(overrides = {}) {
     return normalizeMoviesDir(state.settings.moviesDir || config.moviesDir || "");
   }
 
+  function normalizeParentalLock(value) {
+    return value === true || value === 1 || value === "1" || String(value || "").toLowerCase().trim() === "true" ||
+      String(value || "").toLowerCase().trim() === "on";
+  }
+
+  function isParentalLockEnabled() {
+    return Boolean(state.settings.parentalLock);
+  }
+
+  function isParentalAllowedRating(rated) {
+    const upper = String(rated || "").toUpperCase();
+    if (!upper) {
+      return false;
+    }
+
+    if (upper.includes("PG-13") || upper.includes("PG13")) {
+      return true;
+    }
+
+    if (/\bG\b/.test(upper)) {
+      return true;
+    }
+
+    if (/\bU\b/.test(upper)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function getVisibleMovies() {
+    if (!isParentalLockEnabled()) {
+      return state.moviesIndex;
+    }
+
+    return state.moviesIndex.filter((movie) => isParentalAllowedRating(movie.rated));
+  }
+
+  function findVisibleMovieById(movieId) {
+    return getVisibleMovies().find((movie) => movie.id === movieId) || null;
+  }
+
   async function persistSettings() {
     await saveJsonFile(paths.settings, {
-      moviesDir: getMoviesDir()
+      moviesDir: getMoviesDir(),
+      parentalLock: isParentalLockEnabled()
     });
   }
 
@@ -524,6 +568,13 @@ function createFlexServer(overrides = {}) {
           continue;
         }
 
+        if (field === "tag") {
+          const rawTags = Array.isArray(overrides[field]) ? overrides[field] : [overrides[field]];
+          const tags = [...new Set(rawTags.map((value) => String(value || "").trim()).filter(Boolean))];
+          mergedMovie[field] = tags;
+          continue;
+        }
+
         const value = String(overrides[field] || "").trim();
         if (value) {
           mergedMovie[field] = value;
@@ -555,6 +606,7 @@ function createFlexServer(overrides = {}) {
       country: movie.country,
       poster: movie.poster,
       trailerLink: movie.trailerLink,
+      tag: Array.isArray(movie.tag) ? movie.tag : [],
       imdbId: movie.imdbId,
       missingInfo: movie.missingInfo,
       isManuallyEdited: movie.isManuallyEdited
@@ -575,6 +627,13 @@ function createFlexServer(overrides = {}) {
 
       if (rawValue === null || rawValue === undefined) {
         sanitized[field] = null;
+        continue;
+      }
+
+      if (field === "tag") {
+        const rawTags = Array.isArray(rawValue) ? rawValue : [rawValue];
+        const tags = [...new Set(rawTags.map((value) => String(value || "").trim()).filter(Boolean))];
+        sanitized[field] = tags.length ? tags : null;
         continue;
       }
 
@@ -852,6 +911,7 @@ function createFlexServer(overrides = {}) {
       trailerLink:
         omdbMovie?.trailerLink ||
         `https://www.youtube.com/results?search_query=${encodeURIComponent(`${fallbackTitle} ${fallbackYear} official trailer`)}`,
+      tag: [],
       imdbId: omdbMovie?.imdbId || null
     };
   }
@@ -1063,24 +1123,36 @@ function createFlexServer(overrides = {}) {
 
     res.json({
       moviesDir,
+      parentalLock: isParentalLockEnabled(),
       lastScan: state.lastScan,
-      movieCount: state.moviesIndex.length
+      movieCount: getVisibleMovies().length,
+      totalMovieCount: state.moviesIndex.length
     });
   });
 
   app.post("/api/settings/movies-dir", ensureAuthenticated, async (req, res) => {
     const body = req.body || {};
     const requestedPath = String(body.moviesDir || "").trim();
+    const requestedParentalLock = normalizeParentalLock(body.parentalLock);
 
     try {
       const result = await setMoviesDir(requestedPath);
+      let lockChanged = false;
+
+      if (state.settings.parentalLock !== requestedParentalLock) {
+        state.settings.parentalLock = requestedParentalLock;
+        lockChanged = true;
+        await persistSettings();
+      }
 
       return res.json({
         ok: true,
-        changed: result.changed,
+        changed: result.changed || lockChanged,
         moviesDir: result.moviesDir,
+        parentalLock: isParentalLockEnabled(),
         lastScan: state.lastScan,
-        movieCount: state.moviesIndex.length
+        movieCount: getVisibleMovies().length,
+        totalMovieCount: state.moviesIndex.length
       });
     } catch (error) {
       return res.status(400).json({ error: error.message });
@@ -1092,7 +1164,9 @@ function createFlexServer(overrides = {}) {
       ok: true,
       sourceDir: getMoviesDir() || null,
       lastScan: state.lastScan,
-      movieCount: state.moviesIndex.length,
+      movieCount: getVisibleMovies().length,
+      totalMovieCount: state.moviesIndex.length,
+      parentalLock: isParentalLockEnabled(),
       manualOverrideCount: Object.keys(state.manualOverrides).length,
       trailerCacheCount: Object.keys(state.trailerCache).length,
       vlcAvailable: Boolean(resolveVlcPath()),
@@ -1112,8 +1186,10 @@ function createFlexServer(overrides = {}) {
       res.json({
         sourceDir: getMoviesDir(),
         lastScan: state.lastScan,
-        movieCount: state.moviesIndex.length,
-        movies: state.moviesIndex.map((movie) => serializeMovie(movie))
+        movieCount: getVisibleMovies().length,
+        totalMovieCount: state.moviesIndex.length,
+        parentalLock: isParentalLockEnabled(),
+        movies: getVisibleMovies().map((movie) => serializeMovie(movie))
       });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -1122,7 +1198,7 @@ function createFlexServer(overrides = {}) {
 
   app.get("/api/movies/:id/trailer", ensureAuthenticated, async (req, res) => {
     const { id } = req.params;
-    const match = state.moviesIndex.find((movie) => movie.id === id);
+    const match = findVisibleMovieById(id);
 
     if (!match) {
       return res.status(404).json({ error: "Movie not found." });
@@ -1150,7 +1226,9 @@ function createFlexServer(overrides = {}) {
       res.json({
         ok: true,
         lastScan: state.lastScan,
-        movieCount: state.moviesIndex.length
+        movieCount: getVisibleMovies().length,
+        totalMovieCount: state.moviesIndex.length,
+        parentalLock: isParentalLockEnabled()
       });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -1163,8 +1241,8 @@ function createFlexServer(overrides = {}) {
       return res.status(400).json({ error: "Movie id is required." });
     }
 
-    const movieExists = state.baseMovies.some((movie) => movie.id === id);
-    if (!movieExists) {
+    const existingMovie = findVisibleMovieById(id);
+    if (!existingMovie) {
       return res.status(404).json({ error: "Movie not found." });
     }
 
@@ -1193,7 +1271,7 @@ function createFlexServer(overrides = {}) {
       await saveJsonFile(paths.overrides, state.manualOverrides);
       rebuildMoviesIndex();
 
-      const movie = state.moviesIndex.find((item) => item.id === id);
+      const movie = findVisibleMovieById(id);
       return res.json({
         ok: true,
         movie: movie ? serializeMovie(movie) : null
@@ -1209,7 +1287,7 @@ function createFlexServer(overrides = {}) {
       return res.status(400).json({ error: "Movie id is required." });
     }
 
-    const match = state.moviesIndex.find((movie) => movie.id === id);
+    const match = findVisibleMovieById(id);
     if (!match) {
       return res.status(404).json({ error: "Movie not found." });
     }
@@ -1242,12 +1320,16 @@ function createFlexServer(overrides = {}) {
 
     const savedSettings = await loadJsonFile(paths.settings, {});
     const savedMoviesDir = normalizeMoviesDir(savedSettings.moviesDir);
+    const savedParentalLock = normalizeParentalLock(savedSettings.parentalLock);
+
     if (savedMoviesDir) {
       state.settings.moviesDir = savedMoviesDir;
       config.moviesDir = savedMoviesDir;
     } else {
       state.settings.moviesDir = normalizeMoviesDir(config.moviesDir);
     }
+
+    state.settings.parentalLock = savedParentalLock;
 
     await persistSettings();
 
@@ -1321,7 +1403,9 @@ function createFlexServer(overrides = {}) {
     stop,
     scanMovies,
     getState: () => ({
-      movieCount: state.moviesIndex.length,
+      movieCount: getVisibleMovies().length,
+      totalMovieCount: state.moviesIndex.length,
+      parentalLock: isParentalLockEnabled(),
       lastScan: state.lastScan,
       sourceDir: getMoviesDir(),
       dataDir: config.dataDir

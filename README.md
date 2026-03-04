@@ -50,7 +50,8 @@ If your library path is different, edit `moviesDir` and restart the app.
 - Local profile system with register/login, display name, and display image.
 - Persisted signed-in session (no password needed again until sign out).
 - Settings panel to change movie folder and refresh collection instantly.
-- Manual metadata/poster/trailer overrides.
+- Parental lock option to show only G, U, and PG-13 rated titles.
+- Manual metadata/poster/trailer/tag overrides.
 - `Play` launches the selected movie in VLC desktop player.
 
 ## Configuration (Web / Dev)
@@ -101,7 +102,7 @@ Runtime data caches are stored in the app data directory (`APP_DATA_DIR` or defa
 - `trailer-cache.json`
 - `users.secure.json` (encrypted profile + password-hash storage)
 - `auth-session.json` (active signed-in user session)
-- `app-settings.json` (runtime settings such as selected movies folder)
+- `app-settings.json` (runtime settings such as selected movies folder and parental lock)
 
 ## Naming Convention
 
