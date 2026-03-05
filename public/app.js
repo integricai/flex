@@ -41,13 +41,35 @@ const TAG_OPTIONS = [
   "Docudrama",
   "Concert Film"
 ];
-
+const CAROUSEL_DEFINITIONS = [
+  {
+    id: "drama",
+    label: "Drama",
+    terms: ["drama"]
+  },
+  {
+    id: "comedy",
+    label: "Comedy",
+    terms: ["comedy"]
+  },
+  {
+    id: "horror",
+    label: "Horror",
+    terms: ["horror"]
+  },
+  {
+    id: "gay-themed",
+    label: "Gay Themed",
+    terms: ["gay"]
+  }
+];
 const state = {
   movies: [],
   filteredMovies: [],
   featuredMovieId: null,
   editingMovieId: null,
   activeTrailerToken: null,
+  activeCarouselMovieId: null,
   currentUser: null,
   authMode: "register",
   pendingAvatarDataUrl: null,
@@ -70,6 +92,8 @@ const ui = {
   rescanButton: document.getElementById("rescanButton"),
   settingsButton: document.getElementById("settingsButton"),
   statusText: document.getElementById("statusText"),
+  genreCarouselSection: document.getElementById("genreCarouselSection"),
+  genreRows: document.getElementById("genreRows"),
   movieGrid: document.getElementById("movieGrid"),
   movieCardTemplate: document.getElementById("movieCardTemplate"),
   trailerModal: document.getElementById("trailerModal"),
@@ -77,6 +101,17 @@ const ui = {
   trailerModalTitle: document.getElementById("trailerModalTitle"),
   trailerFrame: document.getElementById("trailerFrame"),
   trailerHint: document.getElementById("trailerHint"),
+  carouselDetailsModal: document.getElementById("carouselDetailsModal"),
+  closeCarouselDetailsModal: document.getElementById("closeCarouselDetailsModal"),
+  carouselDetailsTitle: document.getElementById("carouselDetailsTitle"),
+  carouselDetailsImage: document.getElementById("carouselDetailsImage"),
+  carouselDetailsFallback: document.getElementById("carouselDetailsFallback"),
+  carouselDetailsMeta: document.getElementById("carouselDetailsMeta"),
+  carouselDetailsGenre: document.getElementById("carouselDetailsGenre"),
+  carouselDetailsOrigin: document.getElementById("carouselDetailsOrigin"),
+  carouselDetailsDescription: document.getElementById("carouselDetailsDescription"),
+  carouselDetailsPlayButton: document.getElementById("carouselDetailsPlayButton"),
+  carouselDetailsTrailerButton: document.getElementById("carouselDetailsTrailerButton"),
   editModal: document.getElementById("editModal"),
   closeEditModal: document.getElementById("closeEditModal"),
   editModalTitle: document.getElementById("editModalTitle"),
@@ -176,6 +211,41 @@ function normalizeTagList(value) {
   return [...new Set(textValue.split(",").map((item) => item.trim()).filter(Boolean))];
 }
 
+
+function normalizeGenreToken(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function getMovieGenreTokens(movie) {
+  const tokenSet = new Set();
+  const sources = [movie.genre, ...normalizeTagList(movie.tag)];
+
+  for (const source of sources) {
+    for (const rawToken of String(source || "").split(/[,/|]+/)) {
+      const token = normalizeGenreToken(rawToken);
+      if (token) {
+        tokenSet.add(token);
+      }
+    }
+  }
+
+  return [...tokenSet];
+}
+
+function movieMatchesCarousel(movie, definition) {
+  const tokens = getMovieGenreTokens(movie);
+  if (!tokens.length) {
+    return false;
+  }
+
+  return definition.terms.some((term) => {
+    const normalizedTerm = normalizeGenreToken(term);
+    return tokens.some((token) => token === normalizedTerm || token.includes(normalizedTerm));
+  });
+}
 function populateTagOptions() {
   if (!ui.editTagSelect) {
     return;
@@ -352,6 +422,7 @@ function closeModal(modalElement) {
 
   if (
     ui.trailerModal.classList.contains("hidden") &&
+    ui.carouselDetailsModal.classList.contains("hidden") &&
     ui.editModal.classList.contains("hidden") &&
     ui.settingsModal.classList.contains("hidden")
   ) {
@@ -427,9 +498,12 @@ function clearLibraryState() {
   state.featuredMovieId = null;
   state.editingMovieId = null;
   state.activeTrailerToken = null;
+  state.activeCarouselMovieId = null;
 
   ui.movieGrid.innerHTML = "";
+  ui.genreRows.innerHTML = "";
   ui.heroSection.classList.add("hidden");
+  ui.genreCarouselSection.classList.add("hidden");
 }
 
 async function fetchJson(url, options = {}) {
@@ -447,6 +521,7 @@ async function fetchJson(url, options = {}) {
 
 async function requireReAuth(message) {
   closeTrailerModal();
+  closeCarouselDetailsModal();
   closeEditModal();
   closeSettingsModal();
 
@@ -542,6 +617,47 @@ function closeTrailerModal() {
   ui.trailerFrame.src = "about:blank";
   setTrailerHint("");
   closeModal(ui.trailerModal);
+}
+
+function openCarouselDetailsModal(movie) {
+  state.activeCarouselMovieId = movie.id;
+
+  ui.carouselDetailsTitle.textContent = movie.title || "Movie Details";
+  ui.carouselDetailsMeta.textContent = `Year of Release: ${movie.releaseYear || "Unknown"} | Rated: ${movie.rated || "N/A"}`;
+  ui.carouselDetailsGenre.textContent = `Genre: ${movie.genre || "N/A"}`;
+  ui.carouselDetailsOrigin.textContent = `Language: ${movie.language || "N/A"} | Country of Origin: ${movie.country || "N/A"}`;
+  ui.carouselDetailsDescription.textContent = movie.description || "No description found.";
+  ui.carouselDetailsFallback.textContent = movie.title || "Unknown";
+
+  if (movie.poster) {
+    ui.carouselDetailsImage.src = movie.poster;
+    ui.carouselDetailsImage.classList.remove("hidden");
+    ui.carouselDetailsFallback.classList.add("hidden");
+  } else {
+    ui.carouselDetailsImage.src = "";
+    ui.carouselDetailsImage.classList.add("hidden");
+    ui.carouselDetailsFallback.classList.remove("hidden");
+  }
+
+  ui.carouselDetailsPlayButton.textContent = "Play Movie";
+  ui.carouselDetailsPlayButton.disabled = false;
+  ui.carouselDetailsPlayButton.onclick = () => {
+    void handlePlayButtonClick(ui.carouselDetailsPlayButton, movie);
+  };
+
+  ui.carouselDetailsTrailerButton.onclick = () => {
+    void openTrailerModal(movie);
+  };
+
+  openModal(ui.carouselDetailsModal);
+}
+
+function closeCarouselDetailsModal() {
+  state.activeCarouselMovieId = null;
+  ui.carouselDetailsImage.src = "";
+  ui.carouselDetailsImage.classList.add("hidden");
+  ui.carouselDetailsFallback.textContent = "";
+  closeModal(ui.carouselDetailsModal);
 }
 
 function openEditModal(movie) {
@@ -654,6 +770,29 @@ function renderFeaturedMovie() {
   }
 }
 
+function handlePlayButtonClick(button, movie) {
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "Opening...";
+
+  return playMovie(movie.id)
+    .then(() => {
+      setStatus(`Playing ${movie.title} in VLC player.`);
+    })
+    .catch(async (error) => {
+      if (error.status === 401) {
+        await requireReAuth("Session expired. Sign in to continue.");
+        return;
+      }
+
+      setStatus(`Could not play movie: ${error.message}`);
+    })
+    .finally(() => {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    });
+}
+
 function makeMovieCard(movie, index) {
   const node = ui.movieCardTemplate.content.firstElementChild.cloneNode(true);
   node.style.animationDelay = `${Math.min(index * 30, 540)}ms`;
@@ -690,25 +829,8 @@ function makeMovieCard(movie, index) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
 
-  playButton.addEventListener("click", async () => {
-    const originalLabel = playButton.textContent;
-    playButton.disabled = true;
-    playButton.textContent = "Opening...";
-
-    try {
-      await playMovie(movie.id);
-      setStatus(`Playing ${movie.title} in VLC player.`);
-    } catch (error) {
-      if (error.status === 401) {
-        await requireReAuth("Session expired. Sign in to continue.");
-        return;
-      }
-
-      setStatus(`Could not play movie: ${error.message}`);
-    } finally {
-      playButton.disabled = false;
-      playButton.textContent = originalLabel;
-    }
+  playButton.addEventListener("click", () => {
+    void handlePlayButtonClick(playButton, movie);
   });
 
   trailerButton.addEventListener("click", () => {
@@ -728,6 +850,151 @@ function makeMovieCard(movie, index) {
   }
 
   return node;
+}
+
+function makeCarouselMovieCard(movie, index) {
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "genre-card";
+  card.style.animationDelay = `${Math.min(index * 22, 280)}ms`;
+
+  const media = document.createElement("div");
+  media.className = "genre-card-media";
+
+  const image = document.createElement("img");
+  image.className = "genre-card-image";
+  image.alt = `${movie.title} poster`;
+  image.loading = "lazy";
+
+  const fallback = document.createElement("div");
+  fallback.className = "genre-card-fallback";
+  fallback.textContent = movie.title;
+
+  if (movie.poster) {
+    image.src = movie.poster;
+  } else {
+    media.classList.add("no-image");
+  }
+
+  media.append(image, fallback);
+
+  const body = document.createElement("div");
+  body.className = "genre-card-body";
+
+  const title = document.createElement("h4");
+  title.className = "genre-card-title";
+  title.textContent = movie.title;
+
+  const meta = document.createElement("p");
+  meta.className = "genre-card-meta";
+  meta.textContent = `${movie.releaseYear || "Unknown"} | ${movie.rated || "N/A"}`;
+
+  const blurb = document.createElement("p");
+  blurb.className = "genre-card-blurb";
+  blurb.textContent = movie.description || "No description found.";
+
+  body.append(title, meta, blurb);
+  card.append(media, body);
+
+  card.addEventListener("click", () => {
+    openCarouselDetailsModal(movie);
+  });
+
+  return card;
+}
+
+function makeGenreCarouselRow(definition, movies) {
+  const row = document.createElement("section");
+  row.className = "genre-row";
+
+  const head = document.createElement("div");
+  head.className = "genre-row-head";
+
+  const title = document.createElement("h3");
+  title.textContent = definition.label;
+
+  const count = document.createElement("span");
+  count.className = "genre-row-count";
+  count.textContent = `${movies.length} ${movies.length === 1 ? "movie" : "movies"}`;
+
+  head.append(title, count);
+  row.append(head);
+
+  if (!movies.length) {
+    const empty = document.createElement("p");
+    empty.className = "genre-row-empty";
+    empty.textContent = `No ${definition.label.toLowerCase()} titles matched this view.`;
+    row.append(empty);
+    return row;
+  }
+
+  const shell = document.createElement("div");
+  shell.className = "genre-row-shell";
+
+  const previousButton = document.createElement("button");
+  previousButton.type = "button";
+  previousButton.className = "carousel-nav";
+  previousButton.setAttribute("aria-label", `Scroll ${definition.label} left`);
+  previousButton.textContent = "<";
+
+  const nextButton = document.createElement("button");
+  nextButton.type = "button";
+  nextButton.className = "carousel-nav";
+  nextButton.setAttribute("aria-label", `Scroll ${definition.label} right`);
+  nextButton.textContent = ">";
+
+  const viewport = document.createElement("div");
+  viewport.className = "genre-viewport";
+
+  const track = document.createElement("div");
+  track.className = "genre-track";
+  const cards = movies.map((movie, index) => makeCarouselMovieCard(movie, index));
+  track.append(...cards);
+  viewport.append(track);
+
+  shell.append(previousButton, viewport, nextButton);
+  row.append(shell);
+
+  const updateButtons = () => {
+    const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth - 2);
+    previousButton.disabled = viewport.scrollLeft <= 2;
+    nextButton.disabled = viewport.scrollLeft >= maxScroll;
+  };
+
+  const scrollStep = () => Math.max(Math.floor(viewport.clientWidth * 0.9), 320);
+
+  previousButton.addEventListener("click", () => {
+    viewport.scrollBy({ left: -scrollStep(), behavior: "smooth" });
+  });
+
+  nextButton.addEventListener("click", () => {
+    viewport.scrollBy({ left: scrollStep(), behavior: "smooth" });
+  });
+
+  viewport.addEventListener("scroll", updateButtons, { passive: true });
+  requestAnimationFrame(updateButtons);
+
+  return row;
+}
+
+function renderGenreCarousels() {
+  if (!ui.genreRows || !ui.genreCarouselSection) {
+    return;
+  }
+
+  ui.genreRows.innerHTML = "";
+
+  if (!state.movies.length) {
+    ui.genreCarouselSection.classList.add("hidden");
+    return;
+  }
+
+  ui.genreCarouselSection.classList.remove("hidden");
+
+  for (const definition of CAROUSEL_DEFINITIONS) {
+    const movies = state.filteredMovies.filter((movie) => movieMatchesCarousel(movie, definition));
+    ui.genreRows.append(makeGenreCarouselRow(definition, movies));
+  }
 }
 
 function renderMovieGrid() {
@@ -750,16 +1017,19 @@ function applySearch() {
   if (!query) {
     state.filteredMovies = [...state.movies];
     renderMovieGrid();
+    renderGenreCarousels();
     setStatus(`Showing ${state.filteredMovies.length} movies from your local drive.`);
     return;
   }
 
   state.filteredMovies = state.movies.filter((movie) => {
-    const haystack = `${movie.title} ${movie.genre} ${movie.language} ${movie.country} ${movie.rated} ${movie.releaseYear}`.toLowerCase();
+    const tags = normalizeTagList(movie.tag).join(" ");
+    const haystack = `${movie.title} ${movie.genre} ${movie.language} ${movie.country} ${movie.rated} ${movie.releaseYear} ${tags}`.toLowerCase();
     return haystack.includes(query);
   });
 
   renderMovieGrid();
+  renderGenreCarousels();
   setStatus(`Found ${state.filteredMovies.length} movie(s) matching "${query}".`);
 }
 
@@ -793,6 +1063,7 @@ async function loadMovies(options = {}) {
   state.filteredMovies = [...state.movies];
   renderFeaturedMovie();
   renderMovieGrid();
+  renderGenreCarousels();
 
   const timestamp = payload.lastScan ? new Date(payload.lastScan).toLocaleString() : "N/A";
   const lockText = payload.parentalLock ? " Parental Lock: On (G/U/PG-13 only)." : "";
@@ -979,6 +1250,7 @@ async function logout() {
     });
 
     closeTrailerModal();
+    closeCarouselDetailsModal();
     closeEditModal();
     closeSettingsModal();
 
@@ -1020,6 +1292,12 @@ function wireEvents() {
   ui.settingsForm.addEventListener("submit", submitSettingsForm);
 
   ui.closeTrailerModal.addEventListener("click", closeTrailerModal);
+  ui.closeCarouselDetailsModal.addEventListener("click", closeCarouselDetailsModal);
+  ui.carouselDetailsModal.addEventListener("click", (event) => {
+    if (event.target?.dataset?.close === "carousel-details") {
+      closeCarouselDetailsModal();
+    }
+  });
   ui.trailerModal.addEventListener("click", (event) => {
     if (event.target?.dataset?.close === "trailer") {
       closeTrailerModal();
@@ -1058,6 +1336,12 @@ function wireEvents() {
     ui.activeUserAvatarImage.classList.add("hidden");
   });
 
+  ui.carouselDetailsImage.addEventListener("error", () => {
+    ui.carouselDetailsImage.src = "";
+    ui.carouselDetailsImage.classList.add("hidden");
+    ui.carouselDetailsFallback.classList.remove("hidden");
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") {
       return;
@@ -1065,6 +1349,10 @@ function wireEvents() {
 
     if (!ui.trailerModal.classList.contains("hidden")) {
       closeTrailerModal();
+    }
+
+    if (!ui.carouselDetailsModal.classList.contains("hidden")) {
+      closeCarouselDetailsModal();
     }
 
     if (!ui.editModal.classList.contains("hidden")) {

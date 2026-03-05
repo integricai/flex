@@ -115,6 +115,12 @@
         </div>
       </section>
 
+      <section id="genreCarouselSection" class="genre-section hidden">
+        <div class="section-head">
+          <h2>Browse by Genre</h2>
+        </div>
+        <div id="genreRows" class="genre-rows"></div>
+      </section>
       <section class="library-section">
         <div class="section-head">
           <h2>Your Movies</h2>
@@ -171,6 +177,31 @@
       </section>
     </div>
 
+    <div id="carouselDetailsModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close="carousel-details"></div>
+      <section class="modal-panel carousel-details-panel" role="dialog" aria-modal="true" aria-labelledby="carouselDetailsTitle">
+        <div class="modal-head">
+          <h3 id="carouselDetailsTitle">Movie Details</h3>
+          <button id="closeCarouselDetailsModal" class="icon-btn" type="button" aria-label="Close movie details">x</button>
+        </div>
+        <div class="carousel-details-layout">
+          <div class="carousel-details-image-wrap">
+            <img id="carouselDetailsImage" class="carousel-details-image hidden" alt="Selected movie poster" loading="lazy" />
+            <div id="carouselDetailsFallback" class="carousel-details-fallback"></div>
+          </div>
+          <div class="carousel-details-body">
+            <p id="carouselDetailsMeta" class="carousel-details-meta"></p>
+            <p id="carouselDetailsGenre" class="carousel-details-genre"></p>
+            <p id="carouselDetailsOrigin" class="carousel-details-origin"></p>
+            <p id="carouselDetailsDescription" class="carousel-details-description"></p>
+            <div class="carousel-details-actions">
+              <button id="carouselDetailsPlayButton" class="btn btn-primary" type="button">Play Movie</button>
+              <button id="carouselDetailsTrailerButton" class="btn btn-ghost" type="button">Watch Trailer</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
     <div id="settingsModal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop" data-close="settings"></div>
       <section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
