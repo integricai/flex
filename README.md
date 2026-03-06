@@ -93,6 +93,20 @@ npm run build:win
 
 Output will be in `dist/`.
 
+## Build macOS Installer
+
+macOS artifacts (`.dmg` and `.zip`) can be produced in two ways:
+
+1. On a macOS machine:
+
+```bash
+npm run build:mac
+```
+
+2. In GitHub Actions (recommended from Windows/Linux):
+- Open **Actions** in GitHub.
+- Run **Build macOS Installer** workflow.
+- Download artifact: `flexflix-macos-installers`.
 ## Data Files
 
 Runtime data caches are stored in the app data directory (`APP_DATA_DIR` or default runtime path):
